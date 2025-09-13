@@ -1,3 +1,1 @@
-Flask
-pandas
-gunicorn
+web: gunicorn app:app
