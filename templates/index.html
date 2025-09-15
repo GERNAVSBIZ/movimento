@@ -1,0 +1,173 @@
+<script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    // --- APPLICATION STATE ---
+    let allFlightData = [];
+    let flightsByRuleChart, flightsByDestChart, hourlyFlightsChart;
+    let localFileLoadedCount = 0; // Novo estado para rastrear registros do upload local
+
+    // --- UI ELEMENTS ---
+    const uploadForm = document.getElementById('uploadForm');
+    const dataFile = document.getElementById('dataFile');
+    const uploadButton = document.getElementById('uploadButton');
+    const buttonText = document.getElementById('button-text');
+    const loadingSpinner = document.getElementById('loading-spinner');
+    const tableBody = document.getElementById('dataTableBody');
+    const filterInputs = document.querySelectorAll('.filter-input');
+    const clearFilterButton = document.getElementById('clearFilterButton');
+    const downloadCsvButton = document.getElementById('downloadCsvButton');
+
+    // --- UPLOAD, PROCESS AND SAVE LOGIC ---
+    // Renomeando a função para refletir o novo comportamento
+    async function uploadAndProcessFile() {
+        if (dataFile.files.length === 0) {
+            showToast('Por favor, selecione um arquivo.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('dataFile', dataFile.files[0]);
+
+        toggleLoading(true);
+
+        try {
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Erro no servidor');
+            }
+
+            const data = await response.json();
+            localFileLoadedCount = data.uploadedCount; // Armazena a contagem de registros do upload local
+            showToast(`${data.uploadedCount} registros carregados e salvos com sucesso no Firestore!`, 'success');
+            
+            // Após o upload e salvamento, busca todos os dados do Firebase para atualizar a interface
+            await fetchFromFirebase();
+
+        } catch (error) {
+            console.error('Erro no upload:', error);
+            showToast(error.message, 'error');
+            localFileLoadedCount = 0;
+            // Se o upload falhar, ainda tentamos buscar dados existentes do Firebase
+            await fetchFromFirebase();
+        } finally {
+            toggleLoading(false);
+        }
+    }
+
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await uploadAndProcessFile();
+    });
+
+    // --- FETCH FROM FIREBASE LOGIC ---
+    async function fetchFromFirebase() {
+        showToast('Buscando dados no Firestore...', 'info');
+        try {
+            const response = await fetch('/api/fetch_all');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Erro ao buscar dados do Firebase');
+            }
+
+            const data = await response.json();
+            allFlightData = data.data; // Atualiza a variável global com os dados do Firebase
+            allFlightData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            // Atualiza a interface com os novos dados
+            applyFiltersAndRender();
+            updateStatus();
+            showToast(`Dados do Firestore carregados. Total: ${allFlightData.length} registros.`, 'success');
+
+        } catch (error) {
+            console.error('Erro ao buscar dados do Firebase:', error);
+            showToast(error.message, 'error');
+            allFlightData = [];
+            localFileLoadedCount = 0;
+            applyFiltersAndRender();
+            updateStatus();
+        }
+    }
+
+    // --- FILTERING AND RENDERING LOGIC ---
+    function applyFiltersAndRender() {
+        // Lógica de filtragem permanece a mesma, agora operando sobre `allFlightData`
+        let filteredData = [...allFlightData];
+        let activeFilters = 0;
+
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        const filterValue = document.getElementById('filterValue').value.trim().toUpperCase();
+
+        if (startDate) {
+            filteredData = filteredData.filter(f => f.timestamp && f.timestamp.split('T')[0] >= startDate);
+            activeFilters++;
+        }
+        if (endDate) {
+            filteredData = filteredData.filter(f => f.timestamp && f.timestamp.split('T')[0] <= endDate);
+            activeFilters++;
+        }
+        if (filterValue) {
+            filteredData = filteredData.filter(f =>
+                f.matricula?.toUpperCase().includes(filterValue) ||
+                f.destino?.toUpperCase().includes(filterValue) ||
+                f.tipo_aeronave?.toUpperCase().includes(filterValue)
+            );
+            activeFilters++;
+        }
+        
+        document.getElementById('active-filters').textContent = activeFilters;
+        
+        renderTable(filteredData);
+        renderStats(filteredData);
+        renderCharts(filteredData);
+    }
+    
+    // ... (restante das funções renderTable, renderStats, renderCharts, e utilitárias permanecem as mesmas)
+
+    // A função showToast foi levemente modificada para incluir um tipo de mensagem 'info'
+    function showToast(message, type = 'success') {
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toast-message');
+        const toastIcon = document.getElementById('toast-icon');
+        
+        toastMessage.textContent = message;
+        
+        let iconName = 'check-circle';
+        let toastClass = 'glass-dark';
+
+        if (type === 'error') {
+            iconName = 'x-circle';
+            toastClass = 'bg-red-500';
+        } else if (type === 'info') {
+            iconName = 'info';
+            toastClass = 'bg-blue-500';
+        }
+        
+        toastIcon.setAttribute('data-lucide', iconName);
+        toast.className = `fixed top-5 right-5 ${toastClass} text-white py-3 px-6 rounded-xl shadow-lg opacity-0 transform translate-y-[-20px] z-50`;
+        lucide.createIcons();
+        
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-20px)';
+        }, 3000);
+    }
+
+    // ... (as outras funções utilitárias permanecem inalteradas)
+
+    // Nova função para inicializar o sistema ao carregar a página
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Busca os dados do Firebase ao carregar a página para que a interface não comece vazia
+        await fetchFromFirebase();
+    });
+
+</script>
