@@ -4,35 +4,10 @@
 Servidor Web de Análise de Tráfego Aéreo com Flask
 ===================================================
 
-Este script utiliza o framework Flask para criar um backend (servidor)
-que processa arquivos de tráfego aéreo e os disponibiliza para uma
-interface web (frontend).
-
-Funcionalidades do Backend:
-- Servir a página principal `index.html`.
-- Receber uploads de arquivos .dat via uma API.
-- Utilizar a biblioteca `pandas` para analisar os dados do arquivo.
-- Retornar os dados processados em formato JSON para o frontend.
-- Conectar-se ao Firebase Firestore para salvar e buscar dados.
-
-Bibliotecas necessárias:
---------------------
-- Flask: Para criar o servidor web.
-- pandas: Para manipulação e análise de dados.
-- firebase-admin: Para interagir com o Firebase.
-- gunicorn: Para o deploy em ambientes como o Render.
-
-Como instalar as bibliotecas (execute no seu terminal):
-------------------------------------------------------
-pip install -r requirements.txt
-
-Como executar o servidor:
--------------------------
-1. Salve este arquivo como `app.py`.
-2. Salve o arquivo HTML na mesma pasta, dentro de uma subpasta chamada `templates`.
-3. Certifique-se de que a chave de serviço do Firebase está configurada.
-4. Abra o terminal na pasta principal e execute: python app.py
-5. Acesse http://127.0.0.1:5000 no seu navegador.
+- Processa arquivos .dat de tráfego aéreo
+- Salva os registros no Firestore (Firebase)
+- Disponibiliza API para buscar dados
+- Interface HTML no / (templates/index.html)
 """
 
 from flask import Flask, render_template, request, jsonify
@@ -48,34 +23,33 @@ import os
 # Inicializa a aplicação Flask
 app = Flask(__name__)
 
-# Inicializa Firebase Admin SDK com sua chave de serviço
+# Inicializa Firebase Admin SDK
 try:
-    # Tenta ler as credenciais de uma variável de ambiente (Render)
     credentials_json_str = os.environ.get('FIREBASE_CREDENTIALS')
     if credentials_json_str:
-        cred = credentials.Certificate(json.loads(credentials_json_str))
-        print("Credenciais do Firebase lidas da variável de ambiente.")
+        # Lê direto da variável de ambiente (Render)
+        cred = credentials.Certificate.from_service_account_info(json.loads(credentials_json_str))
+        print("✅ Credenciais do Firebase lidas da variável de ambiente.")
     else:
-        # Se não encontrar, tenta ler do arquivo local (desenvolvimento)
+        # Fallback para arquivo local (desenvolvimento)
         cred = credentials.Certificate("movimento-aeronaves-firebase-adminsdk-fbsvc-78e62bb66c.json")
-        print("Credenciais do Firebase lidas do arquivo local.")
-    
+        print("⚠️ Credenciais do Firebase lidas do arquivo local.")
+
     firebase_admin.initialize_app(cred)
     db = firestore.client()
-    print("Firebase inicializado com sucesso!")
+    print("🔥 Firebase inicializado com sucesso!")
 except Exception as e:
-    print(f"Erro ao inicializar o Firebase: {e}")
+    print(f"❌ Erro ao inicializar o Firebase: {e}")
     db = None
+
 
 def parse_data_file_line_by_line(file_stream):
     """
     Analisa o conteúdo de um arquivo de dados lendo linha por linha.
     """
     records = []
-    
-    # Decodifica o fluxo de bytes em um fluxo de texto e lê linha por linha
     file_content_stream = io.TextIOWrapper(file_stream, encoding='utf-8', errors='ignore')
-    
+
     for line in file_content_stream:
         line_stripped = line.strip()
         if len(line_stripped) <= 50 or line_stripped.startswith('SBIZAIZ0'):
@@ -98,18 +72,18 @@ def parse_data_file_line_by_line(file_stream):
             if rule_match:
                 record['regra_voo'] = rule_match.group(0).replace('IV', 'IFR').replace('VV', 'VFR')
                 rule_index = rule_match.start()
-                
+
                 string_after_rule = line_stripped[rule_index + 2:]
                 pista_match = re.search(r'(\d{2})', string_after_rule)
                 record['pista'] = pista_match.group(1) if pista_match else ''
-                
+
                 string_before_rule = line_stripped[:rule_index]
                 time_matches = re.findall(r'\d{4}', string_before_rule)
                 if time_matches:
                     horario_str = time_matches[-1]
                     time_index = string_before_rule.rfind(horario_str)
                     record['destino'] = line_stripped[27:time_index].strip() or 'N/A'
-                    
+
                     try:
                         data_str = line_stripped[9:15]
                         full_datetime_str = f"{data_str}{horario_str}"
@@ -117,35 +91,35 @@ def parse_data_file_line_by_line(file_stream):
                         record['timestamp'] = dt_obj.isoformat() + 'Z'
                     except (ValueError, IndexError):
                         pass
-            
+
             records.append(record)
 
         except Exception as e:
-            print(f"Erro inesperado ao processar a linha: '{line_stripped}'. Erro: {e}")
+            print(f"⚠️ Erro inesperado ao processar linha: '{line_stripped}'. Erro: {e}")
             records.append(record)
-    
+
     return records
+
 
 def save_to_firebase(records):
     """ Salva os registros no Firestore. """
     if not db:
         return {"error": "Firebase não inicializado"}, 500
-        
+
     batch = db.batch()
     collection_ref = db.collection('movimento_aeronaves')
     count = 0
 
     for record in records:
         doc_ref = collection_ref.document()
-        # Converte timestamp para um objeto de data/hora do Firestore
         if record['timestamp']:
             record['timestamp'] = datetime.fromisoformat(record['timestamp'].replace('Z', '+00:00'))
-        
         batch.set(doc_ref, record)
         count += 1
-    
+
     batch.commit()
     return {"message": f"{count} registros salvos no Firestore"}, 200
+
 
 def fetch_from_firebase():
     """ Busca todos os registros da coleção 'movimento_aeronaves' no Firestore. """
@@ -156,37 +130,34 @@ def fetch_from_firebase():
     docs = db.collection('movimento_aeronaves').stream()
     for doc in docs:
         record = doc.to_dict()
-        # Converte timestamp do Firestore de volta para string ISO
         if isinstance(record.get('timestamp'), datetime):
             record['timestamp'] = record['timestamp'].isoformat() + 'Z'
         records.append(record)
-        
+
     return {"data": records}, 200
+
 
 @app.route('/')
 def index():
     """ Rota principal que renderiza a página HTML. """
     return render_template('index.html')
 
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     """ Rota da API para processar e salvar o arquivo no Firestore. """
     if 'dataFile' not in request.files:
         return jsonify({"error": "Nenhum arquivo enviado"}), 400
-    
+
     file = request.files['dataFile']
-    
     if file.filename == '':
         return jsonify({"error": "Nome de arquivo inválido"}), 400
 
     try:
-        # Agora a função de parsing lê diretamente do fluxo de arquivo para economizar memória
         records = parse_data_file_line_by_line(file.stream)
-        
         if not records:
             return jsonify({"error": "Nenhum registro válido encontrado no arquivo"}), 400
-        
-        # Salva os registros no Firebase
+
         save_result, status_code = save_to_firebase(records)
         if status_code != 200:
             return jsonify(save_result), status_code
@@ -195,12 +166,14 @@ def upload_file():
 
     except Exception as e:
         return jsonify({"error": f"Erro ao processar o arquivo: {str(e)}"}), 500
-        
+
+
 @app.route('/api/fetch_all', methods=['GET'])
 def fetch_all_data():
-    """ Nova rota da API para buscar todos os dados do Firestore. """
+    """ API para buscar todos os dados do Firestore. """
     result, status_code = fetch_from_firebase()
     return jsonify(result), status_code
 
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
