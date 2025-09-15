@@ -4,28 +4,44 @@ from flask import Flask, render_template, request, jsonify
 import re
 from datetime import datetime
 import io
+import os # Importado para verificar a existência do arquivo
 
 # --- Novas importações do Firebase ---
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+# --- LOG INICIAL ---
+print("--- [LOG] 1. Aplicação iniciando ---")
+
 # --- Inicialização Robusta do Firebase Admin SDK ---
-# Variável global para armazenar qualquer erro de inicialização
 FIREBASE_INIT_ERROR = None
 db = None
 
 try:
-    cred = credentials.Certificate("firebase-credentials.json")
-    # Evita reinicialização se já estiver inicializado
+    # --- LOG DE VERIFICAÇÃO DO ARQUIVO ---
+    credentials_path = "firebase-credentials.json"
+    if os.path.exists(credentials_path):
+        print(f"--- [LOG] 2. Arquivo '{credentials_path}' encontrado. ---")
+    else:
+        print(f"--- [LOG] 2. AVISO: Arquivo '{credentials_path}' NÃO foi encontrado. ---")
+
+    cred = credentials.Certificate(credentials_path)
+    print("--- [LOG] 3. Objeto de credenciais criado com sucesso. ---")
+    
     if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
+    
+    print("--- [LOG] 4. Firebase App inicializado com sucesso. ---")
     db = firestore.client()
+    print("--- [LOG] 5. Cliente Firestore conectado. A inicialização foi um sucesso! ---")
+
 except Exception as e:
-    # Captura o erro em uma variável global em vez de apenas imprimir
-    FIREBASE_INIT_ERROR = f"ERRO CRÍTICO: Não foi possível inicializar o Firebase. Verifique o 'Secret File' no Render. Detalhes: {e}"
-    print(FIREBASE_INIT_ERROR)
+    FIREBASE_INIT_ERROR = f"ERRO CRÍTICO: Falha na inicialização do Firebase. Verifique o 'Secret File' no Render. Detalhes: {e}"
+    print(f"--- [LOG] X. {FIREBASE_INIT_ERROR} ---")
 
 app = Flask(__name__)
+print("--- [LOG] 6. Instância do Flask criada. O servidor está pronto para receber requisições. ---")
+
 
 # OTIMIZAÇÃO: A função agora aceita um stream de texto para ler linha por linha
 def parse_data_file(text_stream):
@@ -172,7 +188,7 @@ def get_flights_from_firestore():
             query = query.where(u'timestamp', u'>=', start_date)
         
         if end_date_str:
-            end_date = datetime.strptime(end_date_str + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
+            end_date = datetime.strptime(end_date_str + ' 23:59:59', '%Y-m-%d %H:%M:%S')
             query = query.where(u'timestamp', u'<=', end_date)
         
         docs = query.stream()
