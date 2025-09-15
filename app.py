@@ -42,15 +42,11 @@ app = Flask(__name__)
 print("--- [LOG] 6. Instância do Flask criada. ---")
 
 # --- GERENCIADOR DE ERRO GLOBAL ---
-# Esta função garante que qualquer erro não tratado retorne uma resposta JSON,
-# evitando o erro de "unexpected character '<'" no frontend.
 @app.errorhandler(Exception)
 def handle_exception(e):
-    # Loga o erro completo no servidor para depuração
     print(f"--- ERRO GLOBAL NÃO TRATADO ---")
     print(traceback.format_exc())
     print(f"--- FIM DO ERRO ---")
-    # Retorna uma resposta JSON para o cliente
     response = jsonify({"error": "Ocorreu um erro interno no servidor.", "details": str(e)})
     response.status_code = 500
     return response
@@ -97,7 +93,8 @@ def index():
 def get_files():
     if FIREBASE_INIT_ERROR: return jsonify({"error": FIREBASE_INIT_ERROR}), 500
     
-    files_ref = db.collection(u'files')
+    # OTIMIZAÇÃO: Seleciona apenas os campos necessários para reduzir o uso de memória.
+    files_ref = db.collection(u'files').select([u'fileName', u'uploadTimestamp', u'recordCount'])
     docs = files_ref.stream()
     
     file_list = []
@@ -160,7 +157,6 @@ def get_flights_from_firestore():
 
     query = db.collection(u'flight_records').where(u'fileId', u'==', file_id)
     
-    # Adicionando tratamento de erro para as datas
     try:
         if start_date_str: query = query.where(u'timestamp', u'>=', datetime.strptime(start_date_str, '%Y-%m-%d'))
         if end_date_str: query = query.where(u'timestamp', u'<=', datetime.strptime(f"{end_date_str} 23:59:59", '%Y-%m-%d %H:%M:%S'))
