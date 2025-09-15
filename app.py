@@ -67,17 +67,18 @@ except Exception as e:
     print(f"Erro ao inicializar o Firebase: {e}")
     db = None
 
-def parse_data_file(file_content):
+def parse_data_file_line_by_line(file_stream):
     """
-    Analisa o conteúdo de um arquivo de dados e extrai os registros de voo.
-    Se uma data for inválida, o campo 'timestamp' ficará nulo, mas o resto
-    da linha será processado e incluído no resultado.
+    Analisa o conteúdo de um arquivo de dados lendo linha por linha.
     """
-    lines = file_content.split('\n')
     records = []
     
-    for line in lines:
-        if len(line.strip()) <= 50 or line.startswith('SBIZAIZ0'):
+    # Decodifica o fluxo de bytes em um fluxo de texto e lê linha por linha
+    file_content_stream = io.TextIOWrapper(file_stream, encoding='utf-8', errors='ignore')
+    
+    for line in file_content_stream:
+        line_stripped = line.strip()
+        if len(line_stripped) <= 50 or line_stripped.startswith('SBIZAIZ0'):
             continue
 
         record = {
@@ -86,31 +87,31 @@ def parse_data_file(file_content):
         }
 
         try:
-            operator_match = re.search(r'\S+$', line.strip())
+            operator_match = re.search(r'\S+$', line_stripped)
             if operator_match:
                 record['responsavel'] = operator_match.group(0)
 
-            record['matricula'] = line[15:22].strip()
-            record['tipo_aeronave'] = line[22:27].strip()
+            record['matricula'] = line_stripped[15:22].strip()
+            record['tipo_aeronave'] = line_stripped[22:27].strip()
 
-            rule_match = re.search(r'(IV|VV)', line)
+            rule_match = re.search(r'(IV|VV)', line_stripped)
             if rule_match:
                 record['regra_voo'] = rule_match.group(0).replace('IV', 'IFR').replace('VV', 'VFR')
                 rule_index = rule_match.start()
                 
-                string_after_rule = line[rule_index + 2:]
+                string_after_rule = line_stripped[rule_index + 2:]
                 pista_match = re.search(r'(\d{2})', string_after_rule)
                 record['pista'] = pista_match.group(1) if pista_match else ''
                 
-                string_before_rule = line[:rule_index]
+                string_before_rule = line_stripped[:rule_index]
                 time_matches = re.findall(r'\d{4}', string_before_rule)
                 if time_matches:
                     horario_str = time_matches[-1]
                     time_index = string_before_rule.rfind(horario_str)
-                    record['destino'] = line[27:time_index].strip() or 'N/A'
+                    record['destino'] = line_stripped[27:time_index].strip() or 'N/A'
                     
                     try:
-                        data_str = line[9:15]
+                        data_str = line_stripped[9:15]
                         full_datetime_str = f"{data_str}{horario_str}"
                         dt_obj = datetime.strptime(full_datetime_str, '%d%m%y%H%M')
                         record['timestamp'] = dt_obj.isoformat() + 'Z'
@@ -120,7 +121,7 @@ def parse_data_file(file_content):
             records.append(record)
 
         except Exception as e:
-            print(f"Erro inesperado ao processar a linha: '{line.strip()}'. Erro: {e}")
+            print(f"Erro inesperado ao processar a linha: '{line_stripped}'. Erro: {e}")
             records.append(record)
     
     return records
@@ -179,8 +180,8 @@ def upload_file():
         return jsonify({"error": "Nome de arquivo inválido"}), 400
 
     try:
-        content = io.StringIO(file.stream.read().decode("utf-8", errors='ignore')).getvalue()
-        records = parse_data_file(content)
+        # Agora a função de parsing lê diretamente do fluxo de arquivo para economizar memória
+        records = parse_data_file_line_by_line(file.stream)
         
         if not records:
             return jsonify({"error": "Nenhum registro válido encontrado no arquivo"}), 400
