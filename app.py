@@ -111,10 +111,13 @@ def get_files():
         docs = files_ref.stream()
         file_list = []
         for doc in docs:
-            doc_data = doc.to_dict()
-            if 'uploadTimestamp' in doc_data and doc_data['uploadTimestamp']:
-                 doc_data['uploadTimestamp'] = doc_data['uploadTimestamp'].isoformat() + 'Z'
-            file_list.append({"id": doc.id, "data": doc_data})
+            try: # CORREÇÃO: Adicionado try/except para proteger contra dados malformados
+                doc_data = doc.to_dict()
+                if 'uploadTimestamp' in doc_data and isinstance(doc_data.get('uploadTimestamp'), datetime):
+                     doc_data['uploadTimestamp'] = doc_data['uploadTimestamp'].isoformat() + 'Z'
+                file_list.append({"id": doc.id, "data": doc_data})
+            except Exception as doc_error:
+                print(f"AVISO: Ignorando documento com erro na lista de arquivos. ID: {doc.id}, Erro: {doc_error}")
 
         return jsonify(file_list)
     except Exception as e:
@@ -188,7 +191,8 @@ def get_flights_from_firestore():
             query = query.where(u'timestamp', u'>=', start_date)
         
         if end_date_str:
-            end_date = datetime.strptime(end_date_str + ' 23:59:59', '%Y-m-%d %H:%M:%S')
+            # CORREÇÃO: Corrigido o formato da data de '%Y-m-%d' para '%Y-%m-%d'
+            end_date = datetime.strptime(end_date_str + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
             query = query.where(u'timestamp', u'<=', end_date)
         
         docs = query.stream()
@@ -196,7 +200,7 @@ def get_flights_from_firestore():
         all_flights = []
         for doc in docs:
             flight_data = doc.to_dict()
-            if 'timestamp' in flight_data and flight_data['timestamp']:
+            if 'timestamp' in flight_data and isinstance(flight_data.get('timestamp'), datetime):
                 flight_data['timestamp'] = flight_data['timestamp'].isoformat() + 'Z'
             all_flights.append(flight_data)
         
