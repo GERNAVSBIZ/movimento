@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 from flask import Flask, render_template, request, jsonify
-import pandas as pd
 import re
 from datetime import datetime
 import io
@@ -13,7 +12,9 @@ from firebase_admin import credentials, firestore
 # --- Inicialização do Firebase Admin SDK ---
 try:
     cred = credentials.Certificate("firebase-credentials.json")
-    firebase_admin.initialize_app(cred)
+    # Evita reinicialização se já estiver inicializado
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
     db = firestore.client()
 except Exception as e:
     print(f"ERRO: Não foi possível inicializar o Firebase. Verifique se o arquivo 'firebase-credentials.json' está na pasta. Detalhes: {e}")
@@ -21,11 +22,12 @@ except Exception as e:
 
 app = Flask(__name__)
 
-def parse_data_file(file_content):
-    lines = file_content.split('\n')
+# OTIMIZAÇÃO: A função agora aceita um stream de texto para ler linha por linha
+def parse_data_file(text_stream):
     records = []
     
-    for line in lines:
+    # Processa o arquivo linha por linha para economizar memória
+    for line in text_stream:
         if len(line.strip()) <= 50 or line.startswith('SBIZAIZ0'):
             continue
 
@@ -86,7 +88,6 @@ def get_files():
         files_ref = db.collection(u'files').order_by(u'uploadTimestamp', direction=firestore.Query.DESCENDING)
         docs = files_ref.stream()
         file_list = []
-        # CORREÇÃO: A linha abaixo estava com um erro de digitação ('for doc in doc').
         for doc in docs:
             doc_data = doc.to_dict()
             if 'uploadTimestamp' in doc_data and doc_data['uploadTimestamp']:
@@ -97,7 +98,7 @@ def get_files():
     except Exception as e:
         return jsonify({"error": f"Erro ao buscar lista de arquivos: {str(e)}"}), 500
 
-# Salva o arquivo e os registros associados
+# OTIMIZAÇÃO: Salva os registros em lotes para evitar sobrecarga e timeouts
 @app.route('/api/upload', methods=['POST'])
 def upload_file_and_save_to_firestore():
     if not db:
@@ -108,8 +109,10 @@ def upload_file_and_save_to_firestore():
     if file.filename == '': return jsonify({"error": "Nome de arquivo inválido"}), 400
 
     try:
-        content = io.StringIO(file.stream.read().decode("utf-8", errors='ignore')).getvalue()
-        records = parse_data_file(content)
+        # OTIMIZAÇÃO: Usa um TextIOWrapper para ler o arquivo como um stream de texto
+        text_stream = io.TextIOWrapper(file.stream, encoding='utf-8', errors='ignore')
+        records = parse_data_file(text_stream)
+        
         if not records: return jsonify({"error": "Nenhum registro válido encontrado"}), 400
 
         files_collection = db.collection(u'files')
@@ -123,11 +126,17 @@ def upload_file_and_save_to_firestore():
 
         records_collection = db.collection(u'flight_records')
         batch = db.batch()
-        for record in records:
+        
+        # OTIMIZAÇÃO: Salva os registros em lotes de 499 para não exceder os limites do Firebase
+        for i, record in enumerate(records):
             record['fileId'] = file_id
             doc_ref = records_collection.document()
             batch.set(doc_ref, record)
-        batch.commit()
+            if (i + 1) % 499 == 0:
+                batch.commit()
+                batch = db.batch() # Inicia um novo lote
+        
+        batch.commit() # Salva o lote final com os registros restantes
         
         return jsonify({"success": f"{len(records)} registros de '{file.filename}' foram salvos."})
     except Exception as e:
