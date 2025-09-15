@@ -20,6 +20,7 @@ Bibliotecas necessárias:
 - Flask: Para criar o servidor web.
 - pandas: Para manipulação e análise de dados.
 - firebase-admin: Para interagir com o Firebase.
+- gunicorn: Para o deploy em ambientes como o Render.
 
 Como instalar as bibliotecas (execute no seu terminal):
 ------------------------------------------------------
@@ -29,8 +30,9 @@ Como executar o servidor:
 -------------------------
 1. Salve este arquivo como `app.py`.
 2. Salve o arquivo HTML na mesma pasta, dentro de uma subpasta chamada `templates`.
-3. Abra o terminal na pasta principal e execute: python app.py
-4. Acesse http://127.0.0.1:5000 no seu navegador.
+3. Certifique-se de que a chave de serviço do Firebase está configurada.
+4. Abra o terminal na pasta principal e execute: python app.py
+5. Acesse http://127.0.0.1:5000 no seu navegador.
 """
 
 from flask import Flask, render_template, request, jsonify
@@ -40,14 +42,24 @@ from datetime import datetime
 import io
 import firebase_admin
 from firebase_admin import credentials, firestore
+import json
+import os
 
 # Inicializa a aplicação Flask
 app = Flask(__name__)
 
 # Inicializa Firebase Admin SDK com sua chave de serviço
-# O arquivo de chave JSON é referenciado aqui. Certifique-se de que ele está no diretório correto.
 try:
-    cred = credentials.Certificate("movimento-aeronaves-firebase-adminsdk-fbsvc-78e62bb66c.json")
+    # Tenta ler as credenciais de uma variável de ambiente (Render)
+    credentials_json_str = os.environ.get('FIREBASE_CREDENTIALS')
+    if credentials_json_str:
+        cred = credentials.Certificate(json.loads(credentials_json_str))
+        print("Credenciais do Firebase lidas da variável de ambiente.")
+    else:
+        # Se não encontrar, tenta ler do arquivo local (desenvolvimento)
+        cred = credentials.Certificate("movimento-aeronaves-firebase-adminsdk-fbsvc-78e62bb66c.json")
+        print("Credenciais do Firebase lidas do arquivo local.")
+    
     firebase_admin.initialize_app(cred)
     db = firestore.client()
     print("Firebase inicializado com sucesso!")
