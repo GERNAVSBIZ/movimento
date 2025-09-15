@@ -9,7 +9,11 @@ import io
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- Inicialização do Firebase Admin SDK ---
+# --- Inicialização Robusta do Firebase Admin SDK ---
+# Variável global para armazenar qualquer erro de inicialização
+FIREBASE_INIT_ERROR = None
+db = None
+
 try:
     cred = credentials.Certificate("firebase-credentials.json")
     # Evita reinicialização se já estiver inicializado
@@ -17,8 +21,9 @@ try:
         firebase_admin.initialize_app(cred)
     db = firestore.client()
 except Exception as e:
-    print(f"ERRO: Não foi possível inicializar o Firebase. Verifique se o arquivo 'firebase-credentials.json' está na pasta. Detalhes: {e}")
-    db = None
+    # Captura o erro em uma variável global em vez de apenas imprimir
+    FIREBASE_INIT_ERROR = f"ERRO CRÍTICO: Não foi possível inicializar o Firebase. Verifique o 'Secret File' no Render. Detalhes: {e}"
+    print(FIREBASE_INIT_ERROR)
 
 app = Flask(__name__)
 
@@ -82,8 +87,9 @@ def index():
 # Endpoint para buscar a lista de arquivos
 @app.route('/api/get-files', methods=['GET'])
 def get_files():
-    if not db:
-        return jsonify({"error": "A conexão com o banco de dados não foi inicializada."}), 500
+    # VERIFICAÇÃO: Checa se houve erro na inicialização antes de prosseguir
+    if FIREBASE_INIT_ERROR:
+        return jsonify({"error": FIREBASE_INIT_ERROR}), 500
     try:
         files_ref = db.collection(u'files').order_by(u'uploadTimestamp', direction=firestore.Query.DESCENDING)
         docs = files_ref.stream()
@@ -101,8 +107,9 @@ def get_files():
 # OTIMIZAÇÃO: Salva os registros em lotes para evitar sobrecarga e timeouts
 @app.route('/api/upload', methods=['POST'])
 def upload_file_and_save_to_firestore():
-    if not db:
-        return jsonify({"error": "A conexão com o banco de dados Firebase não foi inicializada."}), 500
+    # VERIFICAÇÃO: Checa se houve erro na inicialização
+    if FIREBASE_INIT_ERROR:
+        return jsonify({"error": FIREBASE_INIT_ERROR}), 500
         
     if 'dataFile' not in request.files: return jsonify({"error": "Nenhum arquivo enviado"}), 400
     file = request.files['dataFile']
@@ -145,7 +152,9 @@ def upload_file_and_save_to_firestore():
 # Busca registros de voo filtrando por arquivo
 @app.route('/api/flights', methods=['GET'])
 def get_flights_from_firestore():
-    if not db: return jsonify({"error": "A conexão com o banco de dados não foi inicializada."}), 500
+    # VERIFICAÇÃO: Checa se houve erro na inicialização
+    if FIREBASE_INIT_ERROR:
+        return jsonify({"error": FIREBASE_INIT_ERROR}), 500
         
     try:
         file_id = request.args.get('fileId')
