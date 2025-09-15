@@ -77,19 +77,18 @@ def parse_data_file(file_content):
 def index():
     return render_template('index.html')
 
-# NOVO: Endpoint para buscar a lista de arquivos
+# Endpoint para buscar a lista de arquivos
 @app.route('/api/get-files', methods=['GET'])
 def get_files():
     if not db:
         return jsonify({"error": "A conexão com o banco de dados não foi inicializada."}), 500
     try:
-        # Busca documentos na coleção 'files', ordenados pelo mais recente
         files_ref = db.collection(u'files').order_by(u'uploadTimestamp', direction=firestore.Query.DESCENDING)
         docs = files_ref.stream()
         file_list = []
-        for doc in doc:
+        # CORREÇÃO: A linha abaixo estava com um erro de digitação ('for doc in doc').
+        for doc in docs:
             doc_data = doc.to_dict()
-            # Converte o timestamp para um formato legível
             if 'uploadTimestamp' in doc_data and doc_data['uploadTimestamp']:
                  doc_data['uploadTimestamp'] = doc_data['uploadTimestamp'].isoformat() + 'Z'
             file_list.append({"id": doc.id, "data": doc_data})
@@ -98,7 +97,7 @@ def get_files():
     except Exception as e:
         return jsonify({"error": f"Erro ao buscar lista de arquivos: {str(e)}"}), 500
 
-# ATUALIZADO: Salva o arquivo e os registros associados
+# Salva o arquivo e os registros associados
 @app.route('/api/upload', methods=['POST'])
 def upload_file_and_save_to_firestore():
     if not db:
@@ -113,7 +112,6 @@ def upload_file_and_save_to_firestore():
         records = parse_data_file(content)
         if not records: return jsonify({"error": "Nenhum registro válido encontrado"}), 400
 
-        # 1. Cria um documento para o arquivo na coleção 'files'
         files_collection = db.collection(u'files')
         file_doc_ref = files_collection.document()
         file_doc_ref.set({
@@ -123,11 +121,10 @@ def upload_file_and_save_to_firestore():
         })
         file_id = file_doc_ref.id
 
-        # 2. Associa cada registro ao ID do arquivo e salva
         records_collection = db.collection(u'flight_records')
         batch = db.batch()
         for record in records:
-            record['fileId'] = file_id  # Adiciona a referência
+            record['fileId'] = file_id
             doc_ref = records_collection.document()
             batch.set(doc_ref, record)
         batch.commit()
@@ -136,7 +133,7 @@ def upload_file_and_save_to_firestore():
     except Exception as e:
         return jsonify({"error": f"Erro ao processar e salvar o arquivo: {str(e)}"}), 500
 
-# ATUALIZADO: Busca registros de voo filtrando por arquivo
+# Busca registros de voo filtrando por arquivo
 @app.route('/api/flights', methods=['GET'])
 def get_flights_from_firestore():
     if not db: return jsonify({"error": "A conexão com o banco de dados não foi inicializada."}), 500
@@ -148,7 +145,7 @@ def get_flights_from_firestore():
         filter_value = request.args.get('filterValue', '').strip().upper()
 
         if not file_id:
-            return jsonify([]) # Retorna vazio se nenhum arquivo for selecionado
+            return jsonify([]) 
 
         query = db.collection(u'flight_records').where(u'fileId', u'==', file_id)
 
@@ -169,7 +166,6 @@ def get_flights_from_firestore():
                 flight_data['timestamp'] = flight_data['timestamp'].isoformat() + 'Z'
             all_flights.append(flight_data)
         
-        # Filtro de texto é aplicado no servidor após a busca no banco
         if filter_value:
             flights = [f for f in all_flights if 
                 filter_value in f.get('matricula', '').upper() or
