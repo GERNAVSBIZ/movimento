@@ -2,23 +2,40 @@
 import os
 import io
 import re
+import json # Importado para processar as credenciais da variável de ambiente
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- INICIALIZAÇÃO DO FIREBASE ---
-# Carrega as credenciais do Firebase a partir do arquivo JSON.
-# Garanta que o arquivo 'firebase-credentials.json' esteja na mesma pasta.
+# --- INICIALIZAÇÃO INTELIGENTE DO FIREBASE ---
+db = None
 try:
-    cred = credentials.Certificate("firebase-credentials.json")
-    firebase_admin.initialize_app(cred)
+    # Tenta carregar as credenciais da variável de ambiente (para OnRender/Produção)
+    firebase_creds_json_str = os.getenv('FIREBASE_CREDENTIALS_JSON')
+    if firebase_creds_json_str:
+        print("Carregando credenciais do Firebase via variável de ambiente...")
+        creds_dict = json.loads(firebase_creds_json_str)
+        cred = credentials.Certificate(creds_dict)
+    else:
+        # Se a variável de ambiente não existir, tenta carregar do arquivo (para desenvolvimento local)
+        print("Carregando credenciais do Firebase via arquivo local 'firebase-credentials.json'...")
+        cred = credentials.Certificate("firebase-credentials.json")
+    
+    # Inicializa o app do Firebase
+    # Verifica se já não foi inicializado para evitar erros durante recarregamentos
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+    
     db = firestore.client()
     print("Firebase conectado com sucesso!")
+
 except Exception as e:
-    print(f"Erro ao conectar com o Firebase: {e}")
-    db = None
+    # Captura qualquer erro durante a inicialização e loga
+    print(f"ERRO CRÍTICO AO CONECTAR COM O FIREBASE: {e}")
+    # A variável 'db' continuará como None, e as rotas irão retornar um erro 500.
+
 
 # Inicializa a aplicação Flask
 app = Flask(__name__)
@@ -26,8 +43,6 @@ app = Flask(__name__)
 def parse_data_file(file_content):
     """
     Analisa o conteúdo de um arquivo de dados e extrai os registros de voo.
-    Se uma data for inválida, o campo 'timestamp' ficará nulo, mas o resto
-    da linha será processado e incluído no resultado.
     """
     lines = file_content.split('\n')
     records = []
@@ -92,7 +107,7 @@ def upload_and_process_file():
     Recebe o arquivo, processa e salva cada registro no Firestore.
     """
     if not db:
-        return jsonify({"error": "Conexão com o Firebase não estabelecida."}), 500
+        return jsonify({"error": "Conexão com o Firebase não estabelecida. Verifique os logs do servidor."}), 500
         
     if 'dataFile' not in request.files:
         return jsonify({"error": "Nenhum arquivo enviado"}), 400
@@ -108,12 +123,11 @@ def upload_and_process_file():
         if not records:
             return jsonify({"error": "Nenhum registro válido encontrado no arquivo"}), 400
 
-        # Salva cada registro no Firestore
         batch = db.batch()
         collection_ref = db.collection('movimento_aeronaves')
         count = 0
         for record in records:
-            # Usar a matrícula e o timestamp (se disponível) para criar um ID único
+            # ID único para evitar duplicatas: matrícula + timestamp. Se não houver, usa a data atual.
             doc_id = f"{record.get('matricula', 'NA')}_{record.get('timestamp', datetime.now().isoformat())}"
             doc_ref = collection_ref.document(doc_id)
             batch.set(doc_ref, record)
@@ -132,14 +146,17 @@ def fetch_from_firebase():
     Busca todos os registros da coleção 'movimento_aeronaves' no Firestore.
     """
     if not db:
-        return jsonify({"error": "Conexão com o Firebase não estabelecida."}), 500
+        return jsonify({"error": "Conexão com o Firebase não estabelecida. Verifique os logs do servidor."}), 500
 
     try:
         docs = db.collection('movimento_aeronaves').stream()
         records = [doc.to_dict() for doc in docs]
         
-        # Converte para um DataFrame do Pandas e depois para JSON para garantir consistência
         df = pd.DataFrame(records)
+        # Garante que a coluna timestamp exista, mesmo que vazia
+        if 'timestamp' not in df.columns:
+            df['timestamp'] = pd.NaT
+        # Converte para JSON com formato de data ISO
         json_data = df.to_json(orient='records', date_format='iso')
         
         return json_data
@@ -148,6 +165,7 @@ def fetch_from_firebase():
         return jsonify({"error": f"Erro ao buscar dados do Firebase: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # Define a porta a partir de uma variável de ambiente, com um padrão para desenvolvimento local
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    # A porta é definida pela variável de ambiente PORT, padrão 8080 para OnRender
+    port = int(os.environ.get("PORT", 8080))
+    # 'host' deve ser '0.0.0.0' para ser acessível externamente
+    app.run(debug=False, host='0.0.0.0', port=port)
