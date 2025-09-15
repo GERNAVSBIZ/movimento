@@ -93,8 +93,13 @@ def index():
 def get_files():
     if FIREBASE_INIT_ERROR: return jsonify({"error": FIREBASE_INIT_ERROR}), 500
     
-    # OTIMIZAÇÃO: Seleciona apenas os campos necessários para reduzir o uso de memória.
-    files_ref = db.collection(u'files').select([u'fileName', u'uploadTimestamp', u'recordCount'])
+    # OTIMIZAÇÃO FINAL: Adiciona ordenação e um limite para buscar apenas os 100 arquivos mais recentes.
+    # Isso previne timeouts e uso excessivo de memória, garantindo que a aplicação inicie rapidamente.
+    files_ref = db.collection(u'files') \
+                  .order_by(u'uploadTimestamp', direction=firestore.Query.DESCENDING) \
+                  .limit(100) \
+                  .select([u'fileName', u'uploadTimestamp', u'recordCount'])
+    
     docs = files_ref.stream()
     
     file_list = []
@@ -116,6 +121,7 @@ def get_files():
             }
         })
     
+    # A ordenação já é feita pelo Firebase, mas uma segunda garantia não custa nada.
     file_list.sort(key=lambda x: x['data']['uploadTimestamp'] or '', reverse=True)
     return jsonify(file_list)
 
