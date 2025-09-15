@@ -1,4 +1,38 @@
 # -*- coding: utf-8 -*-
+
+"""
+Servidor Web de Análise de Tráfego Aéreo com Flask
+===================================================
+
+Este script utiliza o framework Flask para criar um backend (servidor)
+que processa arquivos de tráfego aéreo e os disponibiliza para uma
+interface web (frontend).
+
+Funcionalidades do Backend:
+- Servir a página principal `index.html`.
+- Receber uploads de arquivos .dat via uma API.
+- Utilizar a biblioteca `pandas` para analisar os dados do arquivo.
+- Retornar os dados processados em formato JSON para o frontend.
+- Conectar-se ao Firebase Firestore para salvar e buscar dados.
+
+Bibliotecas necessárias:
+--------------------
+- Flask: Para criar o servidor web.
+- pandas: Para manipulação e análise de dados.
+- firebase-admin: Para interagir com o Firebase.
+
+Como instalar as bibliotecas (execute no seu terminal):
+------------------------------------------------------
+pip install -r requirements.txt
+
+Como executar o servidor:
+-------------------------
+1. Salve este arquivo como `app.py`.
+2. Salve o arquivo HTML na mesma pasta, dentro de uma subpasta chamada `templates`.
+3. Abra o terminal na pasta principal e execute: python app.py
+4. Acesse http://127.0.0.1:5000 no seu navegador.
+"""
+
 from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import re
